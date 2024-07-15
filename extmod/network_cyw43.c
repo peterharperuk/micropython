@@ -39,6 +39,10 @@
 #include "lib/cyw43-driver/src/cyw43.h"
 #include "lib/cyw43-driver/src/cyw43_country.h"
 
+#ifndef MICROPY_PY_NETWORK_CYW43_AUTH_TYPE_DEFAULT
+#define MICROPY_PY_NETWORK_CYW43_AUTH_TYPE_DEFAULT CYW43_AUTH_WPA2_MIXED_PSK
+#endif
+
 // This is the same as cyw43_pm_value but as a macro, to make it a true constant.
 #define CYW43_PM_VALUE(pm_mode, pm2_sleep_ret_ms, li_beacon_period, li_dtim_period, li_assoc) \
     ((li_assoc) << 20 \
@@ -286,7 +290,7 @@ static mp_obj_t network_cyw43_connect(size_t n_args, const mp_obj_t *pos_args, m
         } else {
             // Default to WPA2 otherwise. All other modes require the security
             // kwarg to be set explicitly.
-            auth_type = CYW43_AUTH_WPA2_MIXED_PSK;
+            auth_type = MICROPY_PY_NETWORK_CYW43_AUTH_TYPE_DEFAULT;
         }
     } else {
         auth_type = args[ARG_security].u_int;
@@ -547,6 +551,8 @@ static const mp_rom_map_elem_t network_cyw43_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_IF_AP), MP_ROM_INT(MOD_NETWORK_AP_IF) },
     { MP_ROM_QSTR(MP_QSTR_SEC_OPEN), MP_ROM_INT(CYW43_AUTH_OPEN) },
     { MP_ROM_QSTR(MP_QSTR_SEC_WPA_WPA2), MP_ROM_INT(CYW43_AUTH_WPA2_MIXED_PSK) },
+    { MP_ROM_QSTR(MP_QSTR_SEC_WPA_WPA3), MP_ROM_INT(CYW43_AUTH_WPA3_SAE_AES_PSK) },
+    { MP_ROM_QSTR(MP_QSTR_SEC_WPA_WPA3_WPA2), MP_ROM_INT(CYW43_AUTH_WPA3_WPA2_AES_PSK) },
 
     { MP_ROM_QSTR(MP_QSTR_PM_NONE), MP_ROM_INT(PM_NONE) },
     { MP_ROM_QSTR(MP_QSTR_PM_PERFORMANCE), MP_ROM_INT(PM_PERFORMANCE) },
