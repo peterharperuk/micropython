@@ -121,6 +121,12 @@ static void mp_machine_idle(void) {
     MICROPY_INTERNAL_WFE(1);
 }
 
+// This is called when the alarm goes off
+static void alarm_sleep_callback(uint alarm_id) {
+    hardware_alarm_set_callback(alarm_id, NULL);
+    hardware_alarm_unclaim(alarm_id);
+}
+
 static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     mp_int_t delay_ms = 0;
     bool use_timer_alarm = false;
@@ -196,16 +202,19 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
         #endif
         xosc_dormant();
     } else {
-        bool timer3_enabled = irq_is_enabled(3);
-
-        const uint32_t alarm_num = 3;
-        const uint32_t irq_num = TIMER_ALARM_IRQ_NUM(timer_hw, alarm_num);
+        absolute_time_t alarm_time = make_timeout_time_ms(delay_ms);
         if (use_timer_alarm) {
-            // Make sure ALARM3/IRQ3 is enabled on _this_ core
-            if (!timer3_enabled) {
-                irq_set_enabled(irq_num, true);
+            // The following panics if the alarm claim fails
+            // 3 is used by the pico-sdk for the alarm pool
+            // 2 is used for the micropython soft timer
+            const uint32_t alarm_num = hardware_alarm_claim_unused(true);
+            hardware_alarm_set_callback(alarm_num, alarm_sleep_callback);
+            if (hardware_alarm_set_target(alarm_num, alarm_time) != 0) {
+                // Make sure the alarm is unclaimed on an error
+                alarm_sleep_callback(alarm_num);
+                alarm_time = nil_time;
             }
-            hw_set_bits(&timer_hw->inte, 1u << alarm_num);
+
             // Use timer alarm to wake.
             clocks_hw->sleep_en0 = 0x0;
             #if PICO_RP2040
@@ -215,8 +224,6 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
             #else
             #error Unknown processor
             #endif
-            timer_hw->intr = 1u << alarm_num; // clear any IRQ
-            timer_hw->alarm[alarm_num] = timer_hw->timerawl + delay_ms * 1000;
         } else {
             // TODO: Use RTC alarm to wake.
             clocks_hw->sleep_en0 = 0x0;
@@ -234,25 +241,27 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
             #endif
         }
 
-        #if PICO_ARM
-        // Configure SLEEPDEEP bits on Cortex-M CPUs.
-        #if PICO_RP2040
-        scb_hw->scr |= M0PLUS_SCR_SLEEPDEEP_BITS;
-        #elif PICO_RP2350
-        scb_hw->scr |= M33_SCR_SLEEPDEEP_BITS;
+        // Enable deep sleep at the proc
+        #ifdef __riscv
+        uint32_t bits = RVCSR_MSLEEP_POWERDOWN_BITS;
+        if (!get_core_num()) {
+            bits |= RVCSR_MSLEEP_DEEPSLEEP_BITS;
+        }
+        riscv_set_csr(RVCSR_MSLEEP_OFFSET, bits);
         #else
-        #error Unknown processor
-        #endif
+        scb_hw->scr |= ARM_CPU_PREFIXED(SCR_SLEEPDEEP_BITS);
         #endif
 
         // Go into low-power mode.
-        __wfi();
-
-        if (!timer3_enabled) {
-            irq_set_enabled(irq_num, false);
+        while (absolute_time_diff_us(get_absolute_time(), alarm_time) > 0) {
+            __wfi();
         }
-        clocks_hw->sleep_en0 |= ~(0u);
-        clocks_hw->sleep_en1 |= ~(0u);
+
+        #ifdef __riscv
+        riscv_clear_csr(RVCSR_MSLEEP_OFFSET, RVCSR_MSLEEP_POWERDOWN_BITS | RVCSR_MSLEEP_DEEPSLEEP_BITS);
+        #else
+        scb_hw->scr &= ~ARM_CPU_PREFIXED(SCR_SLEEPDEEP_BITS);
+        #endif
     }
 
     // Enable ROSC.
