@@ -121,12 +121,6 @@ static void mp_machine_idle(void) {
     MICROPY_INTERNAL_WFE(1);
 }
 
-// This is called when the alarm goes off
-static void alarm_sleep_callback(uint alarm_id) {
-    hardware_alarm_set_callback(alarm_id, NULL);
-    hardware_alarm_unclaim(alarm_id);
-}
-
 static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     mp_int_t delay_ms = 0;
     bool use_timer_alarm = false;
@@ -202,16 +196,15 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
         #endif
         xosc_dormant();
     } else {
+        const uint32_t alarm_num = hardware_alarm_claim_unused(true);
         absolute_time_t alarm_time = make_timeout_time_ms(delay_ms);
         if (use_timer_alarm) {
             // The following panics if the alarm claim fails
             // 3 is used by the pico-sdk for the alarm pool
             // 2 is used for the micropython soft timer
-            const uint32_t alarm_num = hardware_alarm_claim_unused(true);
-            hardware_alarm_set_callback(alarm_num, alarm_sleep_callback);
             if (hardware_alarm_set_target(alarm_num, alarm_time) != 0) {
                 // Make sure the alarm is unclaimed on an error
-                alarm_sleep_callback(alarm_num);
+                hardware_alarm_unclaim(alarm_num);
                 alarm_time = nil_time;
             }
 
@@ -262,6 +255,7 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
         #else
         scb_hw->scr &= ~ARM_CPU_PREFIXED(SCR_SLEEPDEEP_BITS);
         #endif
+        hardware_alarm_unclaim(alarm_num);
     }
 
     // Enable ROSC.
