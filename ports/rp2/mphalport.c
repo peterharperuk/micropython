@@ -232,49 +232,8 @@ uint32_t storage_read_blocks(uint8_t *dest, uint32_t block_num, uint32_t num_blo
     panic_unsupported();
 }
 
-uint32_t soft_timer_get_ms(void) {
-    return mp_hal_ticks_ms();
-}
-
-void soft_timer_schedule_at_ms(uint32_t ticks_ms) {
-    int32_t ms = soft_timer_ticks_diff(ticks_ms, mp_hal_ticks_ms());
-    ms = MAX(0, ms);
-    if (hardware_alarm_set_target(MICROPY_HW_SOFT_TIMER_ALARM_NUM, delayed_by_ms(get_absolute_time(), ms))) {
-        // "missed" hardware alarm target
-        hardware_alarm_force_irq(MICROPY_HW_SOFT_TIMER_ALARM_NUM);
-    }
-}
-
-static void soft_timer_hardware_callback(unsigned int alarm_num) {
-    // The timer alarm ISR needs to call here and trigger PendSV dispatch via
-    // a second ISR, as PendSV may be currently suspended by the other CPU.
-    pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
-
-    // This ISR only runs on core0, but if core1 is running Python code then it
-    // may be blocked in WFE so wake it up as well. Unfortunately this also sets
-    // the event flag on core0, so a subsequent WFE on this core will not suspend
-    #if MICROPY_PY_THREAD
-    if (core1_entry != NULL) {
-        __sev();
-    }
-    #endif
-}
-
-void soft_timer_init(void) {
-    hardware_alarm_claim(MICROPY_HW_SOFT_TIMER_ALARM_NUM);
-    hardware_alarm_set_callback(MICROPY_HW_SOFT_TIMER_ALARM_NUM, soft_timer_hardware_callback);
-}
-
 void mp_wfe_or_timeout(uint32_t timeout_ms) {
-    soft_timer_entry_t timer;
-
-    // Note the timer doesn't have an associated callback, it just exists to create a
-    // hardware interrupt to wake the CPU
-    soft_timer_static_init(&timer, SOFT_TIMER_MODE_ONE_SHOT, 0, NULL);
-    soft_timer_insert(&timer, timeout_ms);
-
-    __wfe();
-
-    // Clean up the timer node if it's not already
-    soft_timer_remove(&timer);
+    LOGIC_TRACE(4, true);
+    best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
+    LOGIC_TRACE(4, false);
 }

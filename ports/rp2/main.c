@@ -85,7 +85,11 @@ int main(int argc, char **argv) {
     #endif
 
     pendsv_init();
-    soft_timer_init();
+
+    #ifdef LOGIC_TRACE
+    gpio_init_mask(0x7c); // 2-6
+    gpio_set_dir_masked(0x7c, 0x7c); // 2-6
+    #endif
 
     // Set the MCU frequency and as a side effect the peripheral clock to 48 MHz.
     set_sys_clock_khz(SYS_CLK_KHZ, false);
