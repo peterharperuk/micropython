@@ -143,6 +143,14 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
 
     const uint32_t xosc_hz = XOSC_MHZ * 1000000;
 
+    // This sleep is a temporary workaround.
+    // The rp2xxx ports use the soft timer for "idle sleep" due to issues with the alarm pool.
+    // This executes a wfe but on rp2350 this always completes immediately as software spin locks generate a sev.
+    // So idle sleep is effectively a busy wait which can mean we get here with an outstanding soft timer.
+    // If the timer is due, we delay here to allow it to go off and not immediately wake us up.
+    // See https://github.com/raspberrypi/pico-sdk/issues/1812
+    mp_hal_delay_ms(1);
+
     uint32_t my_interrupts = MICROPY_BEGIN_ATOMIC_SECTION();
     #if MICROPY_PY_NETWORK_CYW43
     if (cyw43_has_pending && cyw43_poll != NULL) {
