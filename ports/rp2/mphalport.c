@@ -236,16 +236,24 @@ uint32_t soft_timer_get_ms(void) {
     return mp_hal_ticks_ms();
 }
 
+static absolute_time_t soft_timer_alarm_time;
+static soft_timer_entry_t timer;
+
 void soft_timer_schedule_at_ms(uint32_t ticks_ms) {
     int32_t ms = soft_timer_ticks_diff(ticks_ms, mp_hal_ticks_ms());
     ms = MAX(0, ms);
-    if (hardware_alarm_set_target(MICROPY_HW_SOFT_TIMER_ALARM_NUM, delayed_by_ms(get_absolute_time(), ms))) {
+
+    soft_timer_alarm_time = delayed_by_ms(get_absolute_time(), ms);
+    if (hardware_alarm_set_target(MICROPY_HW_SOFT_TIMER_ALARM_NUM, soft_timer_alarm_time)) {
         // "missed" hardware alarm target
         hardware_alarm_force_irq(MICROPY_HW_SOFT_TIMER_ALARM_NUM);
     }
 }
 
 static void soft_timer_hardware_callback(unsigned int alarm_num) {
+    soft_timer_alarm_time = nil_time;
+    soft_timer_remove(&timer);
+
     // The timer alarm ISR needs to call here and trigger PendSV dispatch via
     // a second ISR, as PendSV may be currently suspended by the other CPU.
     pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
@@ -266,15 +274,24 @@ void soft_timer_init(void) {
 }
 
 void mp_wfe_or_timeout(uint32_t timeout_ms) {
-    soft_timer_entry_t timer;
-
-    // Note the timer doesn't have an associated callback, it just exists to create a
-    // hardware interrupt to wake the CPU
-    soft_timer_static_init(&timer, SOFT_TIMER_MODE_ONE_SHOT, 0, NULL);
-    soft_timer_insert(&timer, timeout_ms);
+    bool restart_timer = true;
+    if (!is_nil_time(soft_timer_alarm_time)) {
+        int64_t diff = absolute_time_diff_us(delayed_by_ms(get_absolute_time(), timeout_ms), soft_timer_alarm_time);
+        // alarm is before the time we want
+        if (diff <= 0) {
+            restart_timer = false;
+        }
+    }
+    if (restart_timer) {
+        if (!is_nil_time(soft_timer_alarm_time)) {
+            soft_timer_alarm_time = nil_time;
+            soft_timer_remove(&timer);
+        }
+        // Note the timer doesn't have an associated callback, it just exists to create a
+        // hardware interrupt to wake the CPU
+        soft_timer_static_init(&timer, SOFT_TIMER_MODE_ONE_SHOT, 0, NULL);
+        soft_timer_insert(&timer, timeout_ms);
+    }
 
     __wfe();
-
-    // Clean up the timer node if it's not already
-    soft_timer_remove(&timer);
 }
