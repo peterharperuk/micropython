@@ -251,6 +251,9 @@ void soft_timer_schedule_at_ms(uint32_t ticks_ms) {
 }
 
 static void soft_timer_hardware_callback(unsigned int alarm_num) {
+    LOGIC_TRACE(6, true);
+    LOGIC_TRACE(6, false);
+
     soft_timer_alarm_time = nil_time;
     soft_timer_remove(&timer);
 
@@ -293,5 +296,7 @@ void mp_wfe_or_timeout(uint32_t timeout_ms) {
         soft_timer_insert(&timer, timeout_ms);
     }
 
+    LOGIC_TRACE(4, true);
     __wfe();
+    LOGIC_TRACE(4, false);
 }

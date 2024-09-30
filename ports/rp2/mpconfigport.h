@@ -298,3 +298,7 @@ extern void lwip_lock_release(void);
 #define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0;
 #define MICROPY_PY_BLUETOOTH_EXIT (void)atomic_state;
 #endif
+
+#ifndef LOGIC_TRACE
+#define LOGIC_TRACE gpio_put
+#endif

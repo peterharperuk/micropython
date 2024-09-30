@@ -121,9 +121,14 @@ static void mp_machine_idle(void) {
     MICROPY_INTERNAL_WFE(1);
 }
 
+// temporary, to remove
+#define DEBUG_TRACING 1
+
 static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     mp_int_t delay_ms = 0;
     bool use_timer_alarm = false;
+
+    LOGIC_TRACE(2, true);
 
     if (n_args == 1) {
         delay_ms = mp_obj_get_int(args[0]);
@@ -198,6 +203,11 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     // Disable ROSC.
     rosc_hw->ctrl = ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB;
 
+    volatile uint32_t ispr_before0 = 0;
+    volatile uint32_t ispr_before1 = 0;
+    volatile uint32_t ispr_after0 = 0;
+    volatile uint32_t ispr_after1 = 0;
+
     if (n_args == 0) {
         #if MICROPY_PY_NETWORK_CYW43
         gpio_set_dormant_irq_enabled(CYW43_PIN_WL_HOST_WAKE, GPIO_IRQ_LEVEL_HIGH, true);
@@ -219,7 +229,7 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
             #if PICO_RP2040
             clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_SYS_TIMER_BITS;
             #elif PICO_RP2350
-            clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_REF_TICKS_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_TIMER0_BITS;
+            clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_REF_TICKS_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_TIMER0_BITS/* | CLOCKS_SLEEP_EN1_CLK_SYS_USBCTRL_BITS*/; // todo: check usb
             #else
             #error Unknown processor
             #endif
@@ -253,8 +263,28 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
         #endif
         #endif
 
+        #if DEBUG_TRACING
+        #if PICO_RP2040
+        ispr_before0 = *((io_rw_32 *) (PPB_BASE + M0PLUS_NVIC_ISPR_OFFSET));
+        ispr_before1 = 0;
+        #else
+        ispr_before0 = nvic_hw->ispr[0];
+        ispr_before1 = nvic_hw->ispr[1];
+        #endif
+        #endif
+
         // Go into low-power mode.
         __wfi();
+
+        #if DEBUG_TRACING
+        #if PICO_RP2040
+        ispr_after0 = *((io_rw_32 *) (PPB_BASE + M0PLUS_NVIC_ISPR_OFFSET));
+        ispr_after1 = 0;
+        #else
+        ispr_after0 = nvic_hw->ispr[0];
+        ispr_after1 = nvic_hw->ispr[1];
+        #endif
+        #endif
 
         if (!timer3_enabled) {
             irq_set_enabled(irq_num, false);
@@ -269,6 +299,14 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     // Bring back all clocks.
     runtime_init_clocks_optional_usb(disable_usb);
     MICROPY_END_ATOMIC_SECTION(my_interrupts);
+
+    setup_default_uart(); // restore uart
+    LOGIC_TRACE(2, false);
+
+    #if DEBUG_TRACING
+    printf("PETE: ispr before 0x%08lx:%08lx\n", ispr_before1, ispr_before0);
+    printf("PETE: ispr after  0x%08lx:%08lx\n", ispr_after1, ispr_after0);
+    #endif
 }
 
 NORETURN static void mp_machine_deepsleep(size_t n_args, const mp_obj_t *args) {
